@@ -1,0 +1,167 @@
+// SkinLab Database Schema
+// Database: Supabase PostgreSQL
+// ORM: Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // directUrl is used for migrations (bypasses connection pooler)
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHOPS
+// Represents an independent shop/tenant on the platform.
+// All data is scoped to a shop for future multi-tenancy support.
+// ─────────────────────────────────────────────────────────────────────────────
+model Shop {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(120)
+  slug        String   @unique @db.VarChar(80)
+  description String?  @db.Text
+  logoUrl     String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  profiles    Profile[]
+  categories  Category[]
+  products    Product[]
+
+  @@map("shops")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILES
+// Extended user profile linked to Supabase Auth user (auth.users).
+// ─────────────────────────────────────────────────────────────────────────────
+model Profile {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid  // References auth.users.id in Supabase
+  shopId    String   @db.Uuid
+  role      Role     @default(USER)
+  fullName  String?  @db.VarChar(120)
+  avatarUrl String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([userId])
+  @@map("profiles")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATEGORIES
+// Product categories scoped to a shop.
+// ─────────────────────────────────────────────────────────────────────────────
+model Category {
+  id          String    @id @default(uuid()) @db.Uuid
+  shopId      String    @db.Uuid
+  name        String    @db.VarChar(80)
+  slug        String    @db.VarChar(80)
+  description String?   @db.Text
+  iconName    String?   @db.VarChar(50)   // Lucide icon name
+  cardColor   String?   @db.VarChar(10)   // Hex colour for UI card
+  accentColor String?   @db.VarChar(10)
+  bannerUrl   String?   @db.Text          // R2 object key
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  products    Product[]
+
+  @@unique([shopId, slug])
+  @@index([shopId])
+  @@map("categories")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCTS
+// Laptop skin designs belonging to a shop.
+// ─────────────────────────────────────────────────────────────────────────────
+model Product {
+  id                   String         @id @default(uuid()) @db.Uuid
+  shopId               String         @db.Uuid
+  categoryId           String         @db.Uuid
+  designNumber         String         @db.VarChar(10)   // e.g. "028"
+  name                 String         @db.VarChar(200)
+  slug                 String         @db.VarChar(220)
+  description          String         @db.Text
+  finish               ProductFinish?
+  material             String?        @db.VarChar(200)
+  dimensions           String?        @db.VarChar(200)
+  laptopCompatibility  String[]       // Array of laptop model names
+  isFeatured           Boolean        @default(false)
+  isBestseller         Boolean        @default(false)
+  isNew                Boolean        @default(false)
+  isActive             Boolean        @default(true)
+  badge                String?        @db.VarChar(50)   // e.g. "Trending #1"
+  sortOrder            Int            @default(0)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  // Relations
+  shop                 Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  category             Category       @relation(fields: [categoryId], references: [id])
+  images               ProductImage[]
+
+  @@unique([shopId, designNumber])
+  @@unique([shopId, slug])
+  @@index([shopId])
+  @@index([categoryId])
+  @@index([shopId, isFeatured])
+  @@map("products")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCT IMAGES
+// Images stored in Cloudflare R2. Only the object key is stored here.
+// Max 8 images per product enforced at application level.
+// ─────────────────────────────────────────────────────────────────────────────
+model ProductImage {
+  id              String   @id @default(uuid()) @db.Uuid
+  productId       String   @db.Uuid
+  r2Key           String   @db.Text          // R2 object key for original
+  r2ThumbnailKey  String?  @db.Text          // R2 key for Sharp-optimised thumbnail
+  r2PreviewKey    String?  @db.Text          // R2 key for Sharp-generated preview
+  originalName    String?  @db.VarChar(255)
+  mimeType        String   @db.VarChar(50)   // image/jpeg | image/png | image/webp
+  sizeBytes       Int
+  width           Int?
+  height          Int?
+  isPrimary       Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  uploadedAt      DateTime @default(now())
+
+  // Relations
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([productId, isPrimary])
+  @@map("product_images")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+enum Role {
+  ADMIN
+  USER
+}
+
+enum ProductFinish {
+  MATTE_ANTI_GLARE
+  GLOSSY_ULTRA
+  TEXTURED_VINYL
+}

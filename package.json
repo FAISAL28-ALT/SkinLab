@@ -1,0 +1,18 @@
+{
+  "name": "skinlab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SkinLab — Premium Laptop Skin Catalogue Platform",
+  "scripts": {
+    "frontend:dev": "cd frontend && npm run dev",
+    "frontend:build": "cd frontend && npm run build",
+    "frontend:preview": "cd frontend && npm run preview",
+    "backend:dev": "cd backend && npm run dev",
+    "backend:build": "cd backend && npm run build",
+    "dev": "npm run frontend:dev",
+    "typecheck": "cd frontend && npm run typecheck"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
