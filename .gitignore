@@ -18,7 +18,6 @@ backend/.env
 backend/.env.local
 
 # ── Prisma generated ──────────────────────────────────────────────────────────
-backend/prisma/migrations/
 backend/node_modules/.prisma/
 
 # ── Editor & OS ───────────────────────────────────────────────────────────────

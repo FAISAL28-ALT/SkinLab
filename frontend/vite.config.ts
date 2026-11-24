@@ -10,6 +10,10 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  build: {
+    outDir: fileURLToPath(new URL('./dist', import.meta.url)),
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     open: false,

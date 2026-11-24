@@ -1,0 +1,291 @@
+// SkinLab Database Schema
+// Database: Supabase PostgreSQL
+// ORM: Prisma
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../backend/node_modules/.prisma/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ProfileRole {
+  SHOP_ADMIN
+  PLATFORM_ADMIN
+
+  @@map("profile_role")
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("product_status")
+}
+
+enum StorageCleanupStatus {
+  PENDING
+  PROCESSING
+
+  @@map("storage_cleanup_status")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHOPS
+// Represents an independent shop/tenant on the platform.
+// All catalogue data is scoped to a shop for multi-tenancy support.
+// ─────────────────────────────────────────────────────────────────────────────
+model Shop {
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String    @db.VarChar(120)
+  slug         String    @unique @db.VarChar(80)
+  description  String?   @db.Text
+  logoUrl      String?   @map("logo_url") @db.Text
+  contactEmail String?   @map("contact_email") @db.VarChar(255)
+  contactPhone String?   @map("contact_phone") @db.VarChar(50)
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  profiles     Profile[]
+  categories   Category[]
+  products     Product[]
+
+  @@map("shops")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILES
+// Stable application identity, role and shop assignment. IDs preserve existing profile references.
+// ─────────────────────────────────────────────────────────────────────────────
+model Profile {
+  id              String      @id @db.Uuid
+  shopId          String?     @map("shop_id") @db.Uuid
+  fullName        String?     @map("full_name") @db.VarChar(120)
+  email           String      @db.VarChar(255)
+  role            ProfileRole @default(SHOP_ADMIN)
+  isActive        Boolean     @default(true) @map("is_active")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  shop            Shop?       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productsCreated Product[]   @relation("ProductCreatedBy")
+  credential      AuthCredential?
+  authSessions    AuthSession[]
+
+  @@index([shopId], map: "idx_profiles_shop_id")
+  @@index([email], map: "idx_profiles_email")
+  @@map("profiles")
+}
+
+// Application-managed authentication credentials; profile IDs remain the stable user IDs.
+model AuthCredential {
+  userId       String   @id @map("user_id") @db.Uuid
+  loginId      String   @unique(map: "uq_auth_credentials_login_id") @map("login_id") @db.VarChar(80)
+  passwordHash String   @map("password_hash") @db.Text
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  profile      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("auth_credentials")
+}
+
+model AuthSession {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  refreshTokenHash String   @unique @map("refresh_token_hash") @db.Char(64)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  userAgent        String?  @map("user_agent") @db.VarChar(500)
+  ipAddress        String?  @map("ip_address") @db.VarChar(64)
+  profile          Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHistory     AuthRefreshTokenHistory[]
+  @@index([userId, revokedAt, expiresAt], map: "idx_auth_sessions_user_active")
+  @@index([expiresAt], map: "idx_auth_sessions_expiry")
+  @@map("auth_sessions")
+}
+
+model AuthRefreshTokenHistory {
+  tokenHash String   @id @map("token_hash") @db.Char(64)
+  sessionId String   @map("session_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  session   AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([sessionId], map: "idx_auth_refresh_history_session")
+  @@map("auth_refresh_token_history")
+}
+
+model AuthLoginThrottle {
+  key       String   @id @db.Char(64)
+  failures  Int      @default(0)
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@index([lockedUntil], map: "idx_auth_login_throttle_lock")
+  @@map("auth_login_throttles")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATEGORIES
+// Product categories scoped to a shop.
+// ─────────────────────────────────────────────────────────────────────────────
+model Category {
+  id          String    @id @default(uuid()) @db.Uuid
+  shopId      String    @map("shop_id") @db.Uuid
+  name        String    @db.VarChar(80)
+  slug        String    @db.VarChar(80)
+  description String?   @db.Text
+  imageUrl    String?   @map("image_url") @db.Text
+  iconName    String?   @map("icon_name") @db.VarChar(50)
+  cardColor   String?   @map("card_color") @db.VarChar(20)
+  accentColor String?   @map("accent_color") @db.VarChar(20)
+  textColor   String?   @map("text_color") @db.VarChar(20)
+  isActive    Boolean   @default(true) @map("is_active")
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  products    Product[]
+
+  @@unique([shopId, slug], map: "uq_categories_shop_slug")
+  @@unique([shopId, name], map: "uq_categories_shop_name")
+  @@unique([id, shopId], map: "uq_categories_id_shop")
+  @@index([shopId], map: "idx_categories_shop_id")
+  @@index([shopId, isActive, sortOrder], map: "idx_categories_shop_active_sort")
+  @@map("categories")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCTS
+// Laptop skin designs belonging to a shop.
+// ─────────────────────────────────────────────────────────────────────────────
+model Product {
+  id                  String         @id @default(uuid()) @db.Uuid
+  shopId              String         @map("shop_id") @db.Uuid
+  categoryId          String         @map("category_id") @db.Uuid
+  title               String         @db.VarChar(200)
+  slug                String         @db.VarChar(220)
+  designNumber        String         @map("design_number") @db.VarChar(20)
+  description         String         @db.Text
+  designStyle         String?        @map("design_style") @db.VarChar(50)
+  status              ProductStatus  @default(PUBLISHED)
+  isFeatured          Boolean        @default(false) @map("is_featured")
+  isBestseller        Boolean        @default(false) @map("is_bestseller")
+  isTrending          Boolean        @default(false) @map("is_trending")
+  isNew               Boolean        @default(false) @map("is_new")
+  badge               String?        @db.VarChar(50)
+  finish              String?        @db.VarChar(50)
+  material            String?        @db.VarChar(200)
+  dimensions          String?        @db.VarChar(100)
+  laptopCompatibility String[]       @default([]) @map("laptop_compatibility")
+  price               Decimal?       @db.Decimal(10, 2)
+  originalPrice       Decimal?       @map("original_price") @db.Decimal(10, 2)
+  rating              Decimal?       @default(5.0) @db.Decimal(3, 2)
+  reviewCount         Int            @default(0) @map("review_count")
+  createdBy           String?        @map("created_by") @db.Uuid
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  shop                Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  category            Category       @relation(fields: [categoryId, shopId], references: [id, shopId], onDelete: Restrict)
+  author              Profile?       @relation("ProductCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  images              ProductImage[]
+
+  @@unique([shopId, designNumber], map: "uq_products_shop_design_number")
+  @@unique([shopId, slug], map: "uq_products_shop_slug")
+  @@unique([id, shopId], map: "uq_products_id_shop")
+  @@index([shopId], map: "idx_products_shop_id")
+  @@index([categoryId], map: "idx_products_category_id")
+  @@index([shopId, status], map: "idx_products_shop_status")
+  @@index([shopId, isFeatured], map: "idx_products_shop_featured")
+  @@index([shopId, isTrending], map: "idx_products_shop_trending")
+  @@index([createdBy], map: "idx_products_created_by")
+  @@map("products")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCT IMAGES
+// Metadata for images stored in Cloudflare R2 (keys only, no binaries).
+// Maximum 4 images per product; exactly one can be primary.
+// ─────────────────────────────────────────────────────────────────────────────
+model ProductImage {
+  id           String   @id @default(uuid()) @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  originalKey  String   @map("original_key") @db.Text
+  previewKey   String?  @map("preview_key") @db.Text
+  thumbnailKey String?  @map("thumbnail_key") @db.Text
+  altText      String?  @map("alt_text") @db.VarChar(255)
+  isPrimary    Boolean  @default(false) @map("is_primary")
+  sortOrder    Int      @default(0) @map("sort_order")
+  fileSize     Int      @map("file_size")
+  mimeType     String   @map("mime_type") @db.VarChar(50)
+  width        Int?
+  height       Int?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId], map: "idx_product_images_product_id")
+  @@index([productId, sortOrder], map: "idx_product_images_product_sort")
+  @@index([productId, isPrimary], map: "idx_product_images_product_primary")
+  @@map("product_images")
+}
+
+// Durable queue for R2 operations that could not be completed inline. This is
+// intentionally independent of ProductImage so product deletion can cascade
+// metadata while the storage key remains available for retry.
+model StorageCleanupTask {
+  id            String               @id @default(uuid()) @db.Uuid
+  operation     String               @db.VarChar(40)
+  objectKey     String               @map("object_key") @db.Text
+  status        StorageCleanupStatus @default(PENDING)
+  attemptCount  Int                  @default(0) @map("attempt_count")
+  nextAttemptAt DateTime             @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseUntil    DateTime?            @map("lease_until") @db.Timestamptz(6)
+  lastErrorCode String?              @map("last_error_code") @db.VarChar(80)
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([operation, objectKey], map: "uq_storage_cleanup_operation_key")
+  @@index([status, nextAttemptAt], map: "idx_storage_cleanup_pending")
+  @@map("storage_cleanup_tasks")
+}
+
+// Shared, short-lived IP buckets used to throttle authentication endpoints.
+model AuthRateLimitBucket {
+  bucketKey  String   @map("bucket_key") @db.VarChar(64)
+  bucketStart DateTime @map("bucket_start") @db.Timestamptz(6)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  hits       Int      @default(1)
+
+  @@id([bucketKey, bucketStart])
+  @@index([expiresAt], map: "idx_auth_rate_limit_buckets_expiry")
+  @@map("auth_rate_limit_buckets")
+}
+
+model AuthAuditEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(40)
+  ipHash    String?  @map("ip_hash") @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt], map: "idx_auth_audit_events_user_created")
+  @@index([createdAt], map: "idx_auth_audit_events_created")
+  @@map("auth_audit_events")
+}

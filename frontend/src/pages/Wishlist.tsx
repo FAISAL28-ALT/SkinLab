@@ -49,7 +49,7 @@ export const Wishlist: React.FC = () => {
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
-              to="/catalogue"
+              to="/catalog"
               className="px-6 py-3 rounded-full bg-brand-navy hover:bg-black text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2"
             >
               Browse Catalog
@@ -102,7 +102,7 @@ export const Wishlist: React.FC = () => {
               <div className="mt-4 flex-1 flex flex-col justify-between">
                 <div>
                   <div className="text-xs font-bold text-brand-orange">
-                    {product.category}
+                    {product.category}{product.collection ? ` • ${product.collection}` : ''}
                   </div>
                   <Link to={`/product/${product.id}`}>
                     <h3 className="font-display font-bold text-base text-brand-navy hover:text-brand-orange transition-colors truncate">

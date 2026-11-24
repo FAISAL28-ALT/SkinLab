@@ -37,6 +37,15 @@
   background: #9CA3AF;
 }
 
+/* Utility to hide scrollbars while preserving touch/trackpad scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Geometric pattern classes */
 .bg-grid-pattern {
   background-size: 24px 24px;

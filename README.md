@@ -8,45 +8,32 @@ A full-stack web application for managing and showcasing laptop skin designs. Bu
 
 ## Project Structure
 
-```
+```text
 SkinLab/
-├── frontend/          # React + Vite + TypeScript + Tailwind CSS
-│   ├── public/assets/ # Static assets (banners, laptop images, logo)
-│   └── src/
-│       ├── admin/     # Admin panel (Dashboard, Products, Categories)
-│       ├── components/
-│       │   ├── catalogue/   # Catalogue grid, filters, product cards
-│       │   ├── common/      # Navbar, Footer, SearchBar, etc.
-│       │   ├── home/        # Hero, Category, Collection, Trending sections
-│       │   └── preview/     # Laptop Preview Studio components
-│       ├── data/      # Static data (products, categories, laptops) — migrate to API in Phase 2
-│       ├── hooks/     # useProducts, useWishlist
-│       ├── layouts/   # MainLayout (Navbar + Outlet + Footer)
-│       ├── lib/       # Supabase client
-│       ├── pages/     # Public pages (Home, Catalogue, ProductDetails, etc.)
-│       ├── routes/    # Centralized route definitions
-│       ├── services/  # API service layer (productService, etc.)
-│       ├── types/     # TypeScript interfaces
-│       └── context/   # React contexts (Auth)
-│
-├── backend/           # Node.js + Express + TypeScript REST API
-│   ├── prisma/
-│   │   └── schema.prisma   # Database schema (5 tables)
-│   └── src/
-│       ├── config/    # Environment variables
-│       ├── middleware/ # Auth, shop-scoping
-│       ├── modules/   # Feature modules (auth, products, categories, images, shops)
-│       ├── utils/     # Response helpers
-│       ├── app.ts     # Express application
-│       └── server.ts  # HTTP server entry point
-│
-├── package.json       # Workspace root scripts
+├── frontend/
+│   ├── public/assets/       # Banners, laptop images, skins and logo
+│   ├── src/app/              # Application entry and routes
+│   ├── src/components/       # Shared UI, layout and navigation
+│   ├── src/features/catalog/ # Catalog components, data, hooks and types
+│   ├── src/pages/            # Storefront, preview and admin pages
+│   ├── index.html
+│   └── package.json / package-lock.json / Vite and TypeScript configs
+├── backend/
+│   ├── src/                  # Express API
+│   └── package.json
+├── database/
+│   ├── prisma/               # Schema and migrations
+│   ├── seeds/                # Existing Prisma seed
+│   └── README.md
+├── backend/.env              # Backend-only environment and secrets
+├── backend/.env.example
+├── frontend/.env.example
 ├── .gitignore
+├── package.json              # Workspace scripts only
 └── README.md
 ```
 
 ---
-
 ## Tech Stack
 
 | Layer | Technology |
@@ -54,10 +41,10 @@ SkinLab/
 | Frontend Framework | React 18 + Vite 5 + TypeScript |
 | Styling | Tailwind CSS 3 (custom brand tokens) |
 | Routing | React Router v7 |
-| Backend | Node.js + Express + TypeScript |
+| Backend | Node.js + Express + JavaScript (ES modules) |
 | Database | Supabase PostgreSQL |
 | ORM | Prisma 5 |
-| Authentication | Supabase Auth |
+| Authentication | Argon2id + HS256 JWT + PostgreSQL refresh sessions |
 | Image Storage | Cloudflare R2 |
 | Image Processing | Sharp |
 
@@ -83,23 +70,28 @@ npm run dev
 ```bash
 cd backend
 npm install
-cp .env.example .env
-# Fill in your environment variables in .env
+# Configure backend/.env from backend/.env.example
 npm run dev
 # → http://localhost:4000
 ```
 
 ### Environment Variables
 
-#### Frontend (`frontend/.env.local`)
+#### Frontend public variables (`VITE_` prefixed only)
 ```
 VITE_API_URL=http://localhost:4000/api
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 #### Backend (`backend/.env`)
-See `backend/.env.example` for all required variables.
+Set `DATABASE_URL`, `DIRECT_URL`, `JWT_ACCESS_SECRET` (at least 32 random bytes), `JWT_ISSUER`, `JWT_AUDIENCE`, `AUTH_IP_HASH_SECRET` (a separate random secret of at least 32 bytes), and `FRONTEND_URL` to the exact deployed origin. Set `CORS_ORIGINS` to any additional explicit origins. Set `TRUST_PROXY_HOPS` only to the number of trusted reverse proxies in front of Express; leave it at `0` if the API is directly exposed. The backend validates required authentication settings before listening.
+
+The application uses app-managed authentication. Supabase remains the PostgreSQL host; Supabase Auth is not used by the app. Access JWTs are held in frontend memory, and refresh tokens are stored as hashes in PostgreSQL.
+
+**Database migration (not applied automatically):** review and then apply `database/prisma/migrations/20261120010000_application_auth_cutover/migration.sql` after the existing migrations. It adds authentication tables. It does not delete or recreate existing business data. Regenerate Prisma with `cd backend && npm run db:generate` after applying it.
+
+Existing administrator profile IDs and roles are preserved, but Supabase passwords are not copied. After the migration, assign an administrator an app login ID and new password using `cd backend && npm run auth:set-admin-password -- <existing-profile-uuid> <login-id>` in an interactive terminal. The password prompt is hidden.
+
+For production, use HTTPS, set secure cookie deployment, configure only trusted proxy hops, and set the explicit frontend origin list. Passwords are never placed in browser storage; the "Remember me" and recovery-by-email flow are intentionally absent because accounts are managed by administrators.
 
 ---
 
@@ -107,20 +99,25 @@ See `backend/.env.example` for all required variables.
 
 | Role | Permissions |
 |------|-------------|
-| **ADMIN** | Add / Edit / Delete products, Upload images, Manage categories |
-| **USER** | View catalogue, Search & filter, View product details |
+| **SHOP_ADMIN** | Manage data belonging to the assigned active shop |
 
 ---
 
 ## Database Schema
 
-Five tables with proper foreign keys and indexes:
+Application tables with foreign keys, tenant indexes, and row-level policies:
 
-- `shops` — Multi-tenant shop support (future)
-- `profiles` — User profiles linked to Supabase Auth
+- `shops` — Multi-tenant shop records
+- `profiles` — Stable user IDs, role and shop assignment
+- `auth_credentials` — Argon2id password hashes and unique login IDs
+- `auth_sessions` — 48-hour absolute sessions with refresh token hashes
+- `auth_refresh_token_history` — Reuse detection for rotated tokens
+- `auth_login_throttles` — Shared atomic IP and account lockout counters
 - `categories` — Product categories scoped to a shop
 - `products` — Skin designs with metadata
 - `product_images` — Cloudflare R2 object keys (never binary)
+- `auth_rate_limit_buckets` — Shared short-lived IP rate-limit counters
+- `auth_audit_events` — Auth and privileged mutation audit records; IPs are hashed
 
 ---
 
@@ -140,7 +137,7 @@ Five tables with proper foreign keys and indexes:
 | Phase | Status | Description |
 |-------|--------|-------------|
 | **Phase 1** | ✅ Done | Project structure & architecture setup |
-| **Phase 2** | 🔜 Next | Supabase Auth + Prisma database integration |
+| **Phase 2** | ✅ Done | App-managed authentication + Prisma integration |
 | **Phase 3** | 🔜 | Cloudflare R2 image upload + Sharp processing |
 | **Phase 4** | 🔜 | Admin panel full CRUD with real API |
-| **Phase 5** | 🔜 | Multi-shop tenant support |
+| **Phase 5** | ✅ Done | Multi-shop tenant support |
