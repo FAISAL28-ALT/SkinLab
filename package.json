@@ -1,9 +1,12 @@
 {
   "name": "skinlab-workspace",
   "private": true,
+  "type": "module",
   "scripts": {
+    "build": "npm ci --prefix backend --include=dev && npm --prefix backend run db:generate && npm ci --prefix frontend --include=dev && npm run build --prefix frontend",
+    "start": "node backend/src/hostingerServer.js",
     "dev": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend run build",
+    "build:frontend": "npm --prefix frontend run build",
     "backend:dev": "npm --prefix backend run dev",
     "backend:build": "npm --prefix backend run build",
     "db:generate": "npm --prefix backend run db:generate",
