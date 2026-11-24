@@ -12,9 +12,11 @@ export const CollectionSection: React.FC = () => {
       bgColor: 'bg-[#C5F04A]',
       textColor: 'text-brand-navy',
       btnColor: 'bg-brand-navy text-white hover:bg-black',
-      image: '/assets/banners/collection-anime.webp',
+      image: '/assets/banners/collection-anime-thumb.webp',
       alt: 'Anime laptop skin collection featuring iconic characters',
       imageClass: 'w-52 h-28 -bottom-2 -right-2',
+      width: 208,
+      height: 112,
     },
     {
       id: 'cars',
@@ -24,9 +26,11 @@ export const CollectionSection: React.FC = () => {
       bgColor: 'bg-[#D8E9FE]',
       textColor: 'text-brand-navy',
       btnColor: 'bg-brand-navy text-white hover:bg-black',
-      image: '/assets/skins/cars/005.png',
+      image: '/assets/banners/collection-cars-thumb.webp',
       alt: 'Porsche GT3 supercar racing laptop skins',
       imageClass: 'w-52 h-28 -bottom-2 -right-2',
+      width: 208,
+      height: 112,
     },
     {
       id: 'travel',
@@ -36,9 +40,11 @@ export const CollectionSection: React.FC = () => {
       bgColor: 'bg-[#FBF0E4]',
       textColor: 'text-brand-navy',
       btnColor: 'bg-brand-orange text-white hover:bg-[#e05713]',
-      image: '/assets/banners/London Landmarks.png',
+      image: '/assets/banners/collection-travel-thumb.webp',
       alt: 'London Big Ben and World landmarks laptop skin collection',
       imageClass: 'w-55 h-40 -bottom-0 -right-5',
+      width: 220,
+      height: 160,
     },
   ];
 
@@ -76,6 +82,10 @@ export const CollectionSection: React.FC = () => {
             <img
               src={col.image}
               alt={col.alt}
+              width={col.width}
+              height={col.height}
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-contain object-bottom"
             />
           </div>

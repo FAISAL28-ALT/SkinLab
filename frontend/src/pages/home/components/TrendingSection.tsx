@@ -10,7 +10,7 @@ const INITIAL_TRENDING_ORDER = ['013', '021', '024', '009', '028', '007'];
 export const TrendingSection: React.FC = () => {
   const { products: apiProducts, isLoading } = useApiProducts({
     trending: true,
-    limit: 50,
+    limit: 12,
   });
 
   const trendingProducts = useMemo(() => {
@@ -72,7 +72,7 @@ export const TrendingSection: React.FC = () => {
             </div>
           ))
         ) : (
-          trendingProducts.map((product) => {
+          trendingProducts.slice(0, 6).map((product) => {
             const displayNum = product.designNumber.length === 3 && product.designNumber.startsWith('0')
               ? product.designNumber.slice(1)
               : product.designNumber;

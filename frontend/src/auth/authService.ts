@@ -90,18 +90,63 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const authPath = ['/auth/login', '/auth/refresh', '/auth/logout'].includes(path);
+  const isGet = !init.method || init.method.toUpperCase() === 'GET';
+  const cacheMode: RequestCache = (!isGet || authPath) ? 'no-store' : 'default';
+
   const headers = new Headers(init.headers);
-  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (accessToken && !authPath) headers.set('Authorization', `Bearer ${accessToken}`);
-  let response = await fetch(`${apiUrl}${path}`, { ...init, headers, credentials: 'include', cache: 'no-store' });
-  if (response.status === 401 && !authPath && accessToken) {
-    const nextToken = await refreshAccessToken();
-    if (!nextToken) { logoutHandler?.(); return response; }
-    headers.set('Authorization', `Bearer ${nextToken}`);
-    response = await fetch(`${apiUrl}${path}`, { ...init, headers, credentials: 'include', cache: 'no-store' });
-    if (response.status === 401) { setAccessToken(null); logoutHandler?.(); }
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
-  return response;
+  if (accessToken && !authPath) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  // Create timeout signal (20s) if caller didn't provide one
+  const controller = init.signal ? null : new AbortController();
+  const timeoutId = controller ? setTimeout(() => controller.abort(new Error('Network timeout after 20s')), 20_000) : null;
+  const signal = init.signal || controller?.signal;
+
+  const executeFetch = async () => {
+    return fetch(`${apiUrl}${path}`, {
+      ...init,
+      headers,
+      credentials: 'include',
+      cache: cacheMode,
+      signal,
+    });
+  };
+
+  try {
+    let response: Response;
+    try {
+      response = await executeFetch();
+    } catch (networkErr) {
+      // Safe retry once for idempotent GET requests on flaky networks
+      if (isGet && !signal?.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        response = await executeFetch();
+      } else {
+        throw networkErr;
+      }
+    }
+
+    if (response.status === 401 && !authPath && accessToken) {
+      const nextToken = await refreshAccessToken();
+      if (!nextToken) {
+        logoutHandler?.();
+        return response;
+      }
+      headers.set('Authorization', `Bearer ${nextToken}`);
+      response = await executeFetch();
+      if (response.status === 401) {
+        setAccessToken(null);
+        logoutHandler?.();
+      }
+    }
+    return response;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;

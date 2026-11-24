@@ -67,11 +67,13 @@ export async function requireAdminTenantScope(req, res, next) {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
         const sendJson = res.json.bind(res);
         res.json = ((body) => {
+            const result = sendJson(body);
             if (res.statusCode >= 200 && res.statusCode < 400) {
-                void recordAuthEvent('PRIVILEGED_ACTION', req, req.user?.id).then(() => sendJson(body));
-                return res;
+                recordAuthEvent('PRIVILEGED_ACTION', req, req.user?.id).catch((err) => {
+                    console.error('[auth-audit] Failed to persist privileged action event:', err?.message || err);
+                });
             }
-            return sendJson(body);
+            return result;
         });
     }
     next();
@@ -115,11 +117,13 @@ export async function requireShopOwnerScope(req, res, next) {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
         const sendJson = res.json.bind(res);
         res.json = ((body) => {
+            const result = sendJson(body);
             if (res.statusCode >= 200 && res.statusCode < 400) {
-                void recordAuthEvent('PRIVILEGED_ACTION', req, req.user?.id).then(() => sendJson(body));
-                return res;
+                recordAuthEvent('PRIVILEGED_ACTION', req, req.user?.id).catch((err) => {
+                    console.error('[auth-audit] Failed to persist privileged action event:', err?.message || err);
+                });
             }
-            return sendJson(body);
+            return result;
         });
     }
     next();

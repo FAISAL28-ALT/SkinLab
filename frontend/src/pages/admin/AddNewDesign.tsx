@@ -13,6 +13,7 @@ import { COLLECTIONS, CollectionName } from '@/features/catalog/types/product';
 const MAX_IMAGES = 4;
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
 const ACCEPTED_MIME = /^image\/(jpeg|png|webp)$/;
+const DRAFT_KEY = 'skinlab_design_draft';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type NewImage = {
@@ -59,15 +60,43 @@ export const AddNewDesign: React.FC = () => {
   const initialCategoryParam = searchParams.get('category') || (location.state as { category?: string } | null)?.category || '';
   const fileInput = useRef<HTMLInputElement>(null);
   const objectUrls = useRef<string[]>([]);
+  const idempotencyKeyRef = useRef(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `draft-${Date.now()}`);
+
+  // Draft persistence helper
+  const getInitialDraft = () => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(DRAFT_KEY) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  const draft = getInitialDraft();
 
   // Form fields
-  const [title, setTitle] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [collection, setCollection] = useState<CollectionName | ''>('');
-  const [description, setDescription] = useState('');
-  const [featured, setFeatured] = useState(true);
-  const [bestseller, setBestseller] = useState(false);
-  const [trending, setTrending] = useState(false);
+  const [title, setTitle] = useState<string>(draft?.title || '');
+  const [categoryId, setCategoryId] = useState<string>('');
+  const [collection, setCollection] = useState<CollectionName | ''>(draft?.collection || '');
+  const [description, setDescription] = useState<string>(draft?.description || '');
+  const [featured, setFeatured] = useState<boolean>(draft?.featured ?? true);
+  const [bestseller, setBestseller] = useState<boolean>(draft?.bestseller ?? false);
+  const [trending, setTrending] = useState<boolean>(draft?.trending ?? false);
+
+  // Auto-save form draft on slow/unstable connection
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        title,
+        collection,
+        description,
+        featured,
+        bestseller,
+        trending,
+      }));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [title, collection, description, featured, bestseller, trending]);
 
   // Image state
   const [images, setImages] = useState<NewImage[]>([]);
@@ -109,13 +138,12 @@ export const AddNewDesign: React.FC = () => {
   // Auto-generate design number from API (fetch the latest from backend)
   const [nextDesignNumber, setNextDesignNumber] = useState<string>('001');
   useEffect(() => {
-    // Fetch all products to find the highest design number
-    apiFetch('/products?limit=50&sort=newest')
+    // Fetch next available design number via fast dedicated endpoint
+    apiFetch('/products/next-design-number')
       .then((r) => r.json())
-      .then((json: { success: boolean; data?: { designNumber: string }[] }) => {
-        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-          const max = Math.max(0, ...json.data.map((p) => parseInt(p.designNumber, 10) || 0));
-          setNextDesignNumber(String(max + 1).padStart(3, '0'));
+      .then((json: { success: boolean; data?: { nextDesignNumber: string } }) => {
+        if (json.success && json.data?.nextDesignNumber) {
+          setNextDesignNumber(json.data.nextDesignNumber);
         }
       })
       .catch(() => { /* keep default */ });
@@ -239,6 +267,9 @@ export const AddNewDesign: React.FC = () => {
 
       const productRes = await apiFetch('/products', {
         method: 'POST',
+        headers: {
+          'Idempotency-Key': idempotencyKeyRef.current,
+        },
         body: JSON.stringify(productPayload),
       });
       const productJson = await productRes.json() as {
@@ -267,8 +298,12 @@ export const AddNewDesign: React.FC = () => {
       // enforces the 2 MB per-file and 4-image limits, uploads to R2, and writes
       // the ProductImage rows in a single DB transaction with rollback on failure.
 
+      const primaryIdx = images.findIndex((img) => img.id === primaryId);
+      const targetPrimaryIdx = primaryIdx >= 0 ? primaryIdx : 0;
+
       const formData = new FormData();
       formData.append('productId', createdProductId);
+      formData.append('primaryIndex', String(targetPrimaryIdx));
 
       // Append images in user-arranged gallery order
       for (const img of images) {
@@ -298,28 +333,11 @@ export const AddNewDesign: React.FC = () => {
         return;
       }
 
-      // ── Step 3: Persist gallery order and primary image selection ──────────
-      const uploadedImages = uploadJson.data?.images ?? [];
-      if (uploadedImages.length > 0) {
-        const primaryIdx = images.findIndex((img) => img.id === primaryId);
-        const targetPrimaryIdx = primaryIdx >= 0 ? primaryIdx : 0;
-
-        const reorderItems = uploadedImages.map((img, idx) => ({
-          id: img.id,
-          sortOrder: idx,
-          isPrimary: idx === targetPrimaryIdx,
-        }));
-
-        await apiFetch('/images/reorder', {
-          method: 'PATCH',
-          body: JSON.stringify({ productId: createdProductId, items: reorderItems }),
-        }).catch((err) => {
-          // Non-fatal: image URLs are already saved; only order metadata may differ
-          console.warn('[AddNewDesign] Image reorder failed (non-fatal):', err);
-        });
-      }
-
-      // ── Step 4: Navigate to catalog ────────────────────────────────────────
+      // Step 3: Images are already uploaded in parallel and sorted with primary selected in step 2.
+      // Clear draft storage and navigate to catalog.
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {}
       invalidateClientProductCache();
       setSubmitting(false);
       const selectedSlug = categories.find((c) => c.id === categoryId)?.slug;

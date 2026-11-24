@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../../config/database.js';
 import { env } from '../../config/env.js';
-import { requireAuth } from '../../middleware/auth.middleware.js';
+import { requireAuth, optionalAuth, invalidateAuthCache } from '../../middleware/auth.middleware.js';
 import { getOfficialShopCached } from '../../middleware/tenant.middleware.js';
 import { authRateLimit } from '../../middleware/auth-rate-limit.middleware.js';
 import { hashPassword, issueAccessToken, newRefreshToken, refreshHash, sessionLifetimeMs, throttleHash, validPassword, verifyPassword } from '../../services/auth-security.js';
@@ -449,28 +449,36 @@ router.post('/refresh', authRateLimit({ windowMs: 15 * 60 * 1000, max: 60, messa
         res.status(503).json({ success: false, error: { code: 'AUTH_UNAVAILABLE', message: 'Authentication is temporarily unavailable' } });
     }
 });
-router.post('/logout', async (req, res, next) => {
+router.post('/logout', optionalAuth, async (req, res, next) => {
     try {
         res.setHeader('Cache-Control', 'no-store');
         if (!csrfAllowed(req)) {
             res.status(403).json({ success: false, error: { code: 'CSRF_REJECTED', message: 'Request origin is not allowed' } });
             return;
         }
+        let targetSessionId = req.sessionId || null;
+        let targetUserId = req.user?.id || null;
         const refreshToken = readCookie(req, 'skinlab_refresh');
         if (refreshToken) {
             const hash = refreshHash(refreshToken);
-            const session = await prisma.authSession.findUnique({ where: { refreshTokenHash: hash }, select: { id: true } });
-            if (session)
+            const session = await prisma.authSession.findUnique({ where: { refreshTokenHash: hash }, select: { id: true, userId: true } });
+            if (session) {
+                targetSessionId = session.id;
+                targetUserId = session.userId;
                 await prisma.authSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date() } });
-            else {
+            } else {
                 const used = await prisma.authRefreshTokenHistory.findUnique({ where: { tokenHash: hash }, select: { sessionId: true } });
-                if (used)
+                if (used) {
+                    targetSessionId = used.sessionId;
                     await prisma.authSession.updateMany({ where: { id: used.sessionId, revokedAt: null }, data: { revokedAt: new Date() } });
+                }
             }
         }
-        else if (req.sessionId)
+        else if (req.sessionId) {
             await prisma.authSession.updateMany({ where: { id: req.sessionId, revokedAt: null }, data: { revokedAt: new Date() } });
+        }
         clearRefreshCookie(res);
+        invalidateAuthCache(targetSessionId, targetUserId);
         if (req.user)
             await recordAuthEvent('LOGOUT', req, req.user.id);
         res.status(200).json({ success: true, data: { message: 'Logged out' } });
@@ -487,6 +495,7 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
         }
         await prisma.authSession.updateMany({ where: { userId: req.user.id, revokedAt: null }, data: { revokedAt: new Date() } });
         clearRefreshCookie(res);
+        invalidateAuthCache(null, req.user.id);
         res.status(200).json({ success: true, data: { message: 'All sessions revoked' } });
     }
     catch (error) {
@@ -534,6 +543,7 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
             prisma.authSession.updateMany({ where: { userId: req.user.id, id: { not: req.sessionId }, revokedAt: null }, data: { revokedAt: new Date() } }),
         ]);
         await recordAuthEvent('PASSWORD_CHANGED', req, req.user.id);
+        invalidateAuthCache(null, req.user.id);
         res.status(200).json({ success: true, data: { message: 'Password updated; other sessions were revoked.' } });
     }
     catch (error) { next(error); }
@@ -585,41 +595,39 @@ router.patch('/me', requireAuth, async (req, res, next) => {
             profileUpdate.fullName = username;
         }
 
+        let updatedProfile = currentProfile;
         if (Object.keys(profileUpdate).length > 0) {
-            await prisma.profile.update({
+            updatedProfile = await prisma.profile.update({
                 where: { id: req.user.id },
                 data: profileUpdate,
+                include: {
+                    shop: { select: { id: true, name: true, slug: true, logoUrl: true, isActive: true } },
+                    credential: { select: { loginId: true, mustChangePassword: true } },
+                },
             });
         }
 
-        const updatedProfile = await prisma.profile.findUnique({
-            where: { id: req.user.id },
-            include: {
-                shop: { select: { id: true, name: true, slug: true, logoUrl: true, isActive: true } },
-                credential: { select: { loginId: true, mustChangePassword: true } },
-            },
-        });
-
-        if (!updatedProfile) {
-            res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Profile not found' } });
-            return;
-        }
-
-        const userData = await formatUserData(req.user.id);
+        invalidateAuthCache(null, req.user.id);
+        const userData = await formatUserData(updatedProfile);
         res.status(200).json({ success: true, data: userData });
     } catch (error) {
         next(error);
     }
 });
 
-async function formatUserData(profileId) {
-    const updatedProfile = await prisma.profile.findUnique({
-        where: { id: profileId },
-        include: {
-            shop: { select: { id: true, name: true, slug: true, logoUrl: true, isActive: true } },
-            credential: { select: { loginId: true, mustChangePassword: true } },
-        },
-    });
+async function formatUserData(profileOrId) {
+    let updatedProfile;
+    if (typeof profileOrId === 'object' && profileOrId !== null) {
+        updatedProfile = profileOrId;
+    } else {
+        updatedProfile = await prisma.profile.findUnique({
+            where: { id: profileOrId },
+            include: {
+                shop: { select: { id: true, name: true, slug: true, logoUrl: true, isActive: true } },
+                credential: { select: { loginId: true, mustChangePassword: true } },
+            },
+        });
+    }
     if (!updatedProfile) return null;
     let userShop = updatedProfile.shop;
     let userShopId = updatedProfile.shopId;
@@ -674,21 +682,22 @@ router.get('/check-email', requireAuth, authRateLimit({ windowMs: 15 * 60 * 1000
             return;
         }
 
-        const existingProfile = await prisma.profile.findFirst({
-            where: {
-                email: { equals: emailToCheck, mode: 'insensitive' },
-                id: { not: req.user.id },
-            },
-            select: { id: true },
-        });
-
-        const existingCredential = await prisma.authCredential.findFirst({
-            where: {
-                loginId: { equals: emailToCheck, mode: 'insensitive' },
-                userId: { not: req.user.id },
-            },
-            select: { userId: true },
-        });
+        const [existingProfile, existingCredential] = await Promise.all([
+            prisma.profile.findFirst({
+                where: {
+                    email: { equals: emailToCheck, mode: 'insensitive' },
+                    id: { not: req.user.id },
+                },
+                select: { id: true },
+            }),
+            prisma.authCredential.findFirst({
+                where: {
+                    loginId: { equals: emailToCheck, mode: 'insensitive' },
+                    userId: { not: req.user.id },
+                },
+                select: { userId: true },
+            }),
+        ]);
 
         if (existingProfile || existingCredential) {
             res.status(200).json({
@@ -807,6 +816,7 @@ router.post('/change-email', requireAuth, authRateLimit({ windowMs: 15 * 60 * 10
         });
 
         await recordAuthEvent('EMAIL_CHANGED', req, req.user.id);
+        invalidateAuthCache(null, req.user.id);
 
         const userData = await formatUserData(req.user.id);
         res.status(200).json({
@@ -841,6 +851,9 @@ router.delete('/sessions/:id', requireAuth, async (req, res, next) => {
     try {
         const sessionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
         const revoked = await prisma.authSession.updateMany({ where: { id: sessionId, userId: req.user.id, revokedAt: null }, data: { revokedAt: new Date() } });
+        if (revoked.count) {
+            invalidateAuthCache(sessionId, req.user.id);
+        }
         res.status(revoked.count ? 200 : 404).json({ success: Boolean(revoked.count), data: { message: revoked.count ? 'Session revoked' : undefined }, error: revoked.count ? undefined : { code: 'NOT_FOUND', message: 'Session not found' } });
     }
     catch (error) {

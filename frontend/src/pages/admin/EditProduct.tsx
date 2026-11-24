@@ -273,15 +273,16 @@ export function EditProduct() {
         }
       }
 
-      // 2. Delete images that the administrator removed
+      // 2. Delete images that the administrator removed in parallel
       // We perform deletions before uploading to prevent exceeding the MAX_IMAGES limit
       if (deletedImageIds.length > 0) {
-        for (const delId of deletedImageIds) {
-          const delRes = await apiFetch(`/images/${delId}`, { method: 'DELETE' });
-          if (!delRes.ok) {
-            console.warn(`[EditProduct] Failed to delete image ${delId}`);
-          }
-        }
+        await Promise.all(
+          deletedImageIds.map((delId) =>
+            apiFetch(`/images/${delId}`, { method: 'DELETE' }).catch((err) => {
+              console.warn(`[EditProduct] Failed to delete image ${delId}:`, err);
+            })
+          )
+        );
       }
 
       // 3. Upload newly added local images to Cloudflare R2 via backend
@@ -320,7 +321,7 @@ export function EditProduct() {
         });
       }
 
-      // 4. Update gallery order & primary image selection
+      // 4. Update gallery order & primary image selection only when modified
       // Map all images in user-arranged order to their real database UUIDs
       const realOrder = images.map((img) => ({
         tempId: img.id,
@@ -332,20 +333,30 @@ export function EditProduct() {
         const resolvedPrimary = realOrder.find((item) => item.tempId === primaryId)?.realId
           || realOrder[0].realId;
 
-        const reorderItems = realOrder.map((item, idx) => ({
-          id: item.realId,
-          sortOrder: idx,
-          isPrimary: item.realId === resolvedPrimary,
-        }));
+        // Skip unnecessary reorder network call if images and primary flag remain unchanged
+        const originalImages = product.images || [];
+        const orderUnchanged = newImages.length === 0 &&
+          deletedImageIds.length === 0 &&
+          realOrder.length === originalImages.length &&
+          realOrder.every((item, idx) => item.realId === originalImages[idx]?.id) &&
+          originalImages.find((img) => img.isPrimary)?.id === resolvedPrimary;
 
-        const reorderRes = await apiFetch('/images/reorder', {
-          method: 'PATCH',
-          body: JSON.stringify({ productId: id, items: reorderItems }),
-        });
+        if (!orderUnchanged) {
+          const reorderItems = realOrder.map((item, idx) => ({
+            id: item.realId,
+            sortOrder: idx,
+            isPrimary: item.realId === resolvedPrimary,
+          }));
 
-        if (!reorderRes.ok) {
-          const reorderJson = await reorderRes.json().catch(() => null);
-          console.warn('[EditProduct] Image reorder failed (non-fatal):', reorderJson);
+          const reorderRes = await apiFetch('/images/reorder', {
+            method: 'PATCH',
+            body: JSON.stringify({ productId: id, items: reorderItems }),
+          });
+
+          if (!reorderRes.ok) {
+            const reorderJson = await reorderRes.json().catch(() => null);
+            console.warn('[EditProduct] Image reorder failed (non-fatal):', reorderJson);
+          }
         }
       }
 

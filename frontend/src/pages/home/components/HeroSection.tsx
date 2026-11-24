@@ -130,12 +130,28 @@ export const HeroSection: React.FC = () => {
           </div>
 
           <div className="relative z-10 w-full max-w-[500px] sm:max-w-[540px] md:max-w-[580px] lg:max-w-[620px] px-1 sm:px-2">
-            <img
-              src="/assets/banners/hero-laptop.png"
-              alt="SkinLab Nezuko Art Design #28 Laptop Skin Mockup"
-              className="w-full h-auto object-contain block drop-shadow-md select-none"
-              style={{ imageRendering: 'auto' }}
-            />
+            <picture>
+              <source
+                media="(max-width: 640px)"
+                srcSet="/assets/banners/hero-laptop-sm.webp"
+                type="image/webp"
+              />
+              <source
+                srcSet="/assets/banners/hero-laptop.webp"
+                type="image/webp"
+              />
+              <img
+                src="/assets/banners/hero-laptop.png"
+                alt="SkinLab Nezuko Art Design #28 Laptop Skin Mockup"
+                width={620}
+                height={419}
+                className="w-full h-auto object-contain block drop-shadow-md select-none"
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
+                style={{ imageRendering: 'auto', aspectRatio: '1525/1031' }}
+              />
+            </picture>
 
             <div className="absolute top-[48%] -right-1 sm:right-2 md:right-4 transform -translate-y-1/2 flex items-center gap-2 pl-3.5 pr-1.5 py-1 sm:py-1.5 bg-[#C5F04A] text-[#171A35] rounded-full font-extrabold text-xs sm:text-[13px] border border-[#171A35] shadow-sm select-none z-20">
               <span className="font-display">Design #28</span>

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, ArrowUpRight, Star } from 'lucide-react';
+import { Eye, ArrowUpRight, Star, ImageOff } from 'lucide-react';
 import { Product } from '@/features/catalog/types/product';
 import { WishlistButton } from '@/components/shared/WishlistButton';
 
@@ -16,6 +16,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   priority = false,
 }) => {
   const navigate = useNavigate();
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
   // "trending" variant matches the exact homepage bottom row from the reference image
   if (variant === 'trending') {
@@ -26,19 +28,36 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           to={`/product/${product.id}`}
           className="relative block w-full aspect-[16/10.5] overflow-hidden rounded-xl bg-white border border-[#F0F2F5] flex items-center justify-center p-2 group-hover:border-transparent transition-colors"
         >
-          <img
-            src={product.image}
-            alt={`${product.name} ${product.category || 'Skin'}`}
-            className="w-full h-full object-contain transition-transform duration-200 group-hover:scale-105"
-            loading={priority ? 'eager' : 'lazy'}
-            decoding="async"
-            fetchPriority={priority ? 'high' : 'auto'}
-            style={{ imageRendering: 'auto' }}
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
+          {/* Skeleton placeholder while loading */}
+          {!isLoaded && !hasError && (
+            <div className="absolute inset-0 bg-[#E8EAEF] animate-pulse rounded-xl" />
+          )}
 
-          {/* Quick Preview Hover Overlay (Clean, no heavy blur) */}
-          <div className="absolute inset-0 bg-brand-navy/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+          {hasError ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#F6F8FB] text-brand-secondary text-xs">
+              <ImageOff size={18} className="opacity-40 mb-1" />
+              <span className="text-[10px]">Unavailable</span>
+            </div>
+          ) : (
+            <img
+              src={product.image}
+              alt={`${product.name} ${product.category || 'Skin'}`}
+              width={320}
+              height={210}
+              className={`w-full h-full object-contain transition-all duration-300 group-hover:scale-105 ${
+                isLoaded ? 'opacity-100' : 'opacity-0'
+              }`}
+              loading={priority ? 'eager' : 'lazy'}
+              decoding="async"
+              fetchPriority={priority ? 'high' : 'auto'}
+              style={{ imageRendering: 'auto' }}
+              onLoad={() => setIsLoaded(true)}
+              onError={() => setHasError(true)}
+            />
+          )}
+
+          {/* Quick Preview Hover Overlay */}
+          <div className="absolute inset-0 bg-brand-navy/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 pointer-events-none group-hover:pointer-events-auto">
             <button
               type="button"
               onClick={(e) => {
@@ -53,7 +72,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         </Link>
 
-        {/* Bottom Pill Bar (Matches Reference Image Exactly) */}
+        {/* Bottom Pill Bar */}
         <div className="mt-2.5 flex items-center justify-between gap-1.5">
           <Link
             to={`/product/${product.id}`}
@@ -83,16 +102,33 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           to={`/product/${product.id}`}
           className="relative block w-full aspect-[16/11] overflow-hidden rounded-2xl bg-[#F6F8FB] flex items-center justify-center p-3"
         >
-          <img
-            src={product.image}
-            alt={`${product.name} ${product.category || 'Skin'}`}
-            className="w-full h-full object-contain transition-transform duration-200 group-hover:scale-105"
-            loading={priority ? 'eager' : 'lazy'}
-            decoding="async"
-            fetchPriority={priority ? 'high' : 'auto'}
-            style={{ imageRendering: 'auto' }}
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
+          {/* Skeleton placeholder while loading */}
+          {!isLoaded && !hasError && (
+            <div className="absolute inset-0 bg-[#E8EAEF] animate-pulse rounded-2xl" />
+          )}
+
+          {hasError ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#F6F8FB] text-brand-secondary text-xs">
+              <ImageOff size={22} className="opacity-40 mb-1" />
+              <span className="text-xs">Image unavailable</span>
+            </div>
+          ) : (
+            <img
+              src={product.image}
+              alt={`${product.name} ${product.category || 'Skin'}`}
+              width={380}
+              height={260}
+              className={`w-full h-full object-contain transition-all duration-300 group-hover:scale-105 ${
+                isLoaded ? 'opacity-100' : 'opacity-0'
+              }`}
+              loading={priority ? 'eager' : 'lazy'}
+              decoding="async"
+              fetchPriority={priority ? 'high' : 'auto'}
+              style={{ imageRendering: 'auto' }}
+              onLoad={() => setIsLoaded(true)}
+              onError={() => setHasError(true)}
+            />
+          )}
 
           {/* Badges */}
           <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">

@@ -24,7 +24,9 @@ function parseImageUpload(req, res, next) {
 /** POST /api/images/upload: server-managed R2 upload and ProductImage registration. */
 router.post('/upload', requireAuth, requireCatalogEditorScope, parseImageUpload, async (req, res, next) => {
     try {
-        const images = await uploadProductImages({ prisma, storage: r2Storage, shopId: req.shopId, productId: req.body.productId, files: req.files, altText: req.body.altText });
+        const rawPrimaryIndex = req.body.primaryIndex !== undefined ? parseInt(req.body.primaryIndex, 10) : 0;
+        const primaryIndex = Number.isInteger(rawPrimaryIndex) ? rawPrimaryIndex : 0;
+        const images = await uploadProductImages({ prisma, storage: r2Storage, shopId: req.shopId, productId: req.body.productId, files: req.files, altText: req.body.altText, primaryIndex });
         apiCache.invalidateNamespace('products');
         sendSuccess(res, { images }, 201);
     }

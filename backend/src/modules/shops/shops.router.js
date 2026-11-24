@@ -4,6 +4,7 @@ import { sendSuccess, sendError } from '../../utils/response.js';
 import { requireAuth } from '../../middleware/auth.middleware.js';
 import { requireShopOwnerScope, resolvePublicShop } from '../../middleware/tenant.middleware.js';
 import { UpdateShopSchema } from '../../utils/validation.js';
+import { apiCache } from '../../utils/cache.js';
 const router = Router();
 /**
  * GET /api/shops/info
@@ -11,6 +12,13 @@ const router = Router();
  */
 router.get('/info', resolvePublicShop, async (req, res) => {
     try {
+        const cacheKey = `shop:info:${req.shopId}`;
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            sendSuccess(res, cached);
+            return;
+        }
+
         const shop = await prisma.shop.findUnique({
             where: { id: req.shopId },
             select: {
@@ -28,6 +36,7 @@ router.get('/info', resolvePublicShop, async (req, res) => {
             res.status(404).json({ success: false, error: 'Shop not found' });
             return;
         }
+        apiCache.set(cacheKey, shop, 60_000, 'shops');
         sendSuccess(res, shop);
     }
     catch (error) {
@@ -47,6 +56,7 @@ router.patch('/current', requireAuth, requireShopOwnerScope, async (req, res) =>
             where: { id: shopId },
             data,
         });
+        apiCache.invalidateNamespace('shops');
         sendSuccess(res, updated);
     }
     catch (error) {

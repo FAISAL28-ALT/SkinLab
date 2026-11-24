@@ -90,7 +90,7 @@ async function cleanupUploadedObjects(prisma, storage, keys) {
     if (failedKeys.length) console.error('[Product image cleanup queued]', { count: failedKeys.length });
 }
 
-export async function uploadProductImages({ prisma, storage, shopId, productId, files, altText }) {
+export async function uploadProductImages({ prisma, storage, shopId, productId, files, altText, primaryIndex = 0 }) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(productId))) {
         throw new ProductImageError('A valid product ID is required', 400, 'INVALID_PRODUCT_ID');
     }
@@ -104,34 +104,66 @@ export async function uploadProductImages({ prisma, storage, shopId, productId, 
     if (!product) throw new ProductImageError('Product not found in this shop', 404, 'NOT_FOUND');
     if (product._count.images + files.length > MAX_PRODUCT_IMAGES) throw new ProductImageError('Image limit reached: a product can have at most 4 images', 400, 'IMAGE_LIMIT_REACHED');
     const inspected = files.map(inspectProductImage);
+
+    // Controlled parallel upload to Cloudflare R2
+    const uploadResults = await Promise.allSettled(
+        files.map((file, index) =>
+            storage.uploadObject({
+                body: file.buffer,
+                mimeType: inspected[index].mimeType,
+                originalFilename: file.originalname,
+                prefix: `products/${productId}`,
+            })
+        )
+    );
+
     const uploaded = [];
-    try {
-        for (let index = 0; index < files.length; index += 1) {
-            uploaded.push(await storage.uploadObject({ body: files[index].buffer, mimeType: inspected[index].mimeType, originalFilename: files[index].originalname, prefix: `products/${productId}` }));
+    const uploadErrors = [];
+    for (let index = 0; index < uploadResults.length; index += 1) {
+        const result = uploadResults[index];
+        if (result.status === 'fulfilled') {
+            uploaded.push({ key: result.value.key, url: result.value.url, index });
+        } else {
+            uploadErrors.push({ index, error: result.reason });
         }
     }
-    catch (error) {
+
+    if (uploadErrors.length > 0) {
+        // Partial upload failure: clean up any fulfilled files before failing
         await cleanupUploadedObjects(prisma, storage, uploaded.map((item) => item.key));
-        throw error;
+        throw uploadErrors[0].error;
     }
+
+    const targetPrimaryIdx = typeof primaryIndex === 'number' && primaryIndex >= 0 && primaryIndex < files.length
+        ? primaryIndex
+        : 0;
+
     try {
         const images = await prisma.$transaction(async (tx) => {
             await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
             const existingCount = await tx.productImage.count({ where: { productId } });
             if (existingCount + uploaded.length > MAX_PRODUCT_IMAGES) throw new ProductImageError('Image limit reached: a product can have at most 4 images', 400, 'IMAGE_LIMIT_REACHED');
+
+            const itemsToInsert = uploaded.map((item, index) => ({
+                productId,
+                originalKey: item.key,
+                altText: altTextValues[index]?.trim() || undefined,
+                fileSize: inspected[index].fileSize,
+                mimeType: inspected[index].mimeType,
+                width: inspected[index].width,
+                height: inspected[index].height,
+                isPrimary: existingCount === 0 && index === targetPrimaryIdx,
+                sortOrder: existingCount + index,
+            }));
+
+            if (typeof tx.productImage.createManyAndReturn === 'function') {
+                return await tx.productImage.createManyAndReturn({ data: itemsToInsert });
+            }
+
+            // Fallback for environments / test mocks that do not define createManyAndReturn
             const created = [];
-            for (let index = 0; index < uploaded.length; index += 1) {
-                created.push(await tx.productImage.create({ data: {
-                    productId,
-                    originalKey: uploaded[index].key,
-                    altText: altTextValues[index]?.trim() || undefined,
-                    fileSize: inspected[index].fileSize,
-                    mimeType: inspected[index].mimeType,
-                    width: inspected[index].width,
-                    height: inspected[index].height,
-                    isPrimary: existingCount === 0 && index === 0,
-                    sortOrder: existingCount + index,
-                } }));
+            for (const item of itemsToInsert) {
+                created.push(await tx.productImage.create({ data: item }));
             }
             return created;
         });
@@ -202,14 +234,15 @@ export async function deleteProductWithImages({ prisma, storage, shopId, product
             const locked = await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid AND shop_id = ${shopId}::uuid FOR UPDATE`;
             if (!locked.length) throw new ProductImageError('Product not found in this shop', 404, 'NOT_FOUND');
             const images = await tx.productImage.findMany({ where: { productId }, select: { originalKey: true } });
+            // Parallelize external storage deletions to minimize transaction hold time
+            const deleteResults = await Promise.allSettled(
+                images.map((image) => storage.deleteObject(image.originalKey))
+            );
             let queuedCleanupCount = 0;
-            for (const image of images) {
-                try {
-                    await storage.deleteObject(image.originalKey);
-                }
-                catch {
+            for (let i = 0; i < deleteResults.length; i += 1) {
+                if (deleteResults[i].status === 'rejected') {
                     try {
-                        await enqueueR2Deletion(tx, image.originalKey);
+                        await enqueueR2Deletion(tx, images[i].originalKey);
                         queuedCleanupCount += 1;
                     }
                     catch {

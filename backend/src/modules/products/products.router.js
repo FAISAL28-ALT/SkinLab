@@ -96,9 +96,10 @@ router.get('/', resolvePublicShop, async (req, res) => {
         }
 
         // Check in-memory cache first with normalized key
-        const cacheKey = `products:list:shop:${shopId}:cat:${(categoryParam || 'all').toLowerCase()}:col:${(collectionParam || 'all').toLowerCase()}:q:${normalizedSearch}:lap:${laptopParam || 'all'}:sort:${sortBy}:trend:${trendingParam ?? 'all'}:p:${page}:l:${limit}`;
+        const cacheKey = `products:list:shop:${shopId}:cat:${(categoryParam || 'all').toLowerCase()}:col:${(collectionParam || 'all').toLowerCase()}:q:${normalizedSearch}:lap:${laptopParam || 'all'}:sort:${sortBy}:trend:${trendingParam ?? 'all'}:p:${page}:l:${limit}:f:${req.query.full === 'true'}`;
         const cached = apiCache.get(cacheKey);
         if (cached) {
+            res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
             sendPaginated(res, cached.items, cached.total, page, limit);
             return;
         }
@@ -174,7 +175,7 @@ router.get('/', resolvePublicShop, async (req, res) => {
                     isNew: true,
                     badge: true,
                     finish: true,
-                    laptopCompatibility: true,
+                    laptopCompatibility: req.query.full === 'true',
                     createdAt: true,
                     category: {
                         select: { id: true, name: true, slug: true },
@@ -200,9 +201,29 @@ router.get('/', resolvePublicShop, async (req, res) => {
 
         const formatted = attachImageUrls(products);
         apiCache.set(cacheKey, { items: formatted, total }, 60_000, 'products');
+        res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
         sendPaginated(res, formatted, total, page, limit);
     }
     catch (error) {
+        sendError(res, error.message);
+    }
+});
+/**
+ * GET /api/products/next-design-number
+ * Fast, lightweight calculation of the next available design number for the tenant.
+ */
+router.get('/next-design-number', resolvePublicShop, async (req, res) => {
+    try {
+        const shopId = req.shopId;
+        const rows = await prisma.$queryRaw`
+            SELECT MAX(NULLIF(regexp_replace(design_number, '[^0-9]', '', 'g'), '')::int) as max_num
+            FROM products
+            WHERE shop_id = ${shopId}::uuid
+        `;
+        const maxNum = rows[0]?.max_num ?? 0;
+        const nextDesignNumber = String(maxNum + 1).padStart(3, '0');
+        sendSuccess(res, { nextDesignNumber });
+    } catch (error) {
         sendError(res, error.message);
     }
 });
@@ -223,6 +244,11 @@ router.get('/:id', resolvePublicShop, async (req, res) => {
         const cacheKey = `products:detail:${id}:shop:${shopId}:${isEditor ? 'admin' : 'public'}`;
         const cached = apiCache.get(cacheKey);
         if (cached) {
+            if (!isEditor) {
+                res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+            } else {
+                res.setHeader('Cache-Control', 'no-store');
+            }
             sendSuccess(res, cached);
             return;
         }
@@ -258,6 +284,11 @@ router.get('/:id', resolvePublicShop, async (req, res) => {
         }
         const formatted = attachImageUrlsSingle(product);
         apiCache.set(cacheKey, formatted, 60_000, 'products');
+        if (!isEditor) {
+            res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+        } else {
+            res.setHeader('Cache-Control', 'no-store');
+        }
         sendSuccess(res, formatted);
     }
     catch (error) {

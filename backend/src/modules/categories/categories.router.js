@@ -21,6 +21,7 @@ router.get('/', resolvePublicShop, async (req, res) => {
         const cacheKey = `categories:list:${shopId}`;
         const cached = apiCache.get(cacheKey);
         if (cached) {
+            res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=300');
             sendSuccess(res, cached);
             return;
         }
@@ -47,6 +48,7 @@ router.get('/', resolvePublicShop, async (req, res) => {
             _count: undefined,
         }));
         apiCache.set(cacheKey, formatted, 60_000, 'categories');
+        res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=300');
         sendSuccess(res, formatted);
     }
     catch (error) {

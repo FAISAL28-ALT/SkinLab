@@ -6,18 +6,20 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 
-// Pages
+// Eager Landing Page
 import { Home } from '@/pages/home/Home';
-import { ProductDetails } from '@/pages/product-details/ProductDetails';
-import { PreviewStudio } from '@/pages/preview/PreviewStudio';
-import { Wishlist } from '@/pages/Wishlist';
-import { EditProduct } from '@/pages/admin/EditProduct';
-import { AddNewDesign } from '@/pages/admin/AddNewDesign';
-import { Login } from '@/pages/Login';
-import { Catalog } from '@/pages/laptop-skins/Catalog';
-import { ChangePassword } from '@/pages/ChangePassword';
-import { Settings } from '@/pages/settings/Settings';
-import { NotFound } from '@/pages/NotFound';
+
+// Lazy-loaded routes for code-splitting on slow networks
+const Catalog = React.lazy(() => import('@/pages/laptop-skins/Catalog').then(m => ({ default: m.Catalog })));
+const ProductDetails = React.lazy(() => import('@/pages/product-details/ProductDetails').then(m => ({ default: m.ProductDetails })));
+const PreviewStudio = React.lazy(() => import('@/pages/preview/PreviewStudio').then(m => ({ default: m.PreviewStudio })));
+const Wishlist = React.lazy(() => import('@/pages/Wishlist').then(m => ({ default: m.Wishlist })));
+const AddNewDesign = React.lazy(() => import('@/pages/admin/AddNewDesign').then(m => ({ default: m.AddNewDesign })));
+const EditProduct = React.lazy(() => import('@/pages/admin/EditProduct').then(m => ({ default: m.EditProduct })));
+const Login = React.lazy(() => import('@/pages/Login').then(m => ({ default: m.Login })));
+const ChangePassword = React.lazy(() => import('@/pages/ChangePassword').then(m => ({ default: m.ChangePassword })));
+const Settings = React.lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })));
+const NotFound = React.lazy(() => import('@/pages/NotFound').then(m => ({ default: m.NotFound })));
 
 export function App() {
   return (
