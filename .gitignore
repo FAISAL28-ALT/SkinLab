@@ -48,8 +48,5 @@ backend/tsconfig.tsbuildinfo
 # ── Test coverage ─────────────────────────────────────────────────────────────
 coverage/
 
-# ── HD product images — keep out of repository ────────────────────────────────
-# Original hi-res skin images should be stored in Cloudflare R2, not here
-frontend/public/assets/skins/**/*.png
-# Allow small optimised webp thumbnails committed for local dev
-!frontend/public/assets/skins/**/*.webp
+# ── Product skin images ────────────────────────────────────────────────────────
+# Static local catalogue assets are tracked; R2 object uploads remain outside git
